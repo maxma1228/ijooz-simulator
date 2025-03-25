@@ -36,7 +36,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.image("https://cdn-icons-png.flaticon.com/512/590/590685.png", width=120)
 st.markdown('<p class="title-text">🍊 IJOOZ 仓库模拟器</p>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle-text">上传仓库使用计划 Excel 文件，自动计算库存及生命周期。</p>', unsafe_allow_html=True)
 st.markdown("---")
