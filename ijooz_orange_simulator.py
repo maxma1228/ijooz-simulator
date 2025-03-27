@@ -34,32 +34,42 @@ uploaded_file = st.file_uploader("📤 上传 Excel 文件", type=["xlsx", "xls"
 def add_charts_to_workbook(wb):
     if "Daily Inventory" not in wb.sheetnames or "Container Schedule" not in wb.sheetnames:
         return
+
     chart_sheet = wb.create_sheet("Charts")
 
+    # === 📈 每日库存趋势折线图 ===
     inv_ws = wb["Daily Inventory"]
     chart1 = LineChart()
     chart1.title = "每日库存趋势"
-    chart1.y_axis.title = "库存单位数"
-    chart1.x_axis.title = "日期"
     chart1.height = 10
     chart1.width = 20
+
+    chart1.x_axis.title = "日期"
     chart1.x_axis.majorTickMark = "out"
     chart1.x_axis.tickLblPos = "low"
+    chart1.x_axis.numFmt = "yyyy-mm-dd"
+
+    chart1.y_axis.title = "库存单位数"
     chart1.y_axis.tickLblPos = "low"
+    chart1.y_axis.majorTickMark = "out"
     chart1.y_axis.majorGridlines = None
+
     data = Reference(inv_ws, min_col=2, max_col=3, min_row=1, max_row=inv_ws.max_row)
     categories = Reference(inv_ws, min_col=1, min_row=2, max_row=inv_ws.max_row)
     chart1.add_data(data, titles_from_data=True)
     chart1.set_categories(categories)
     chart_sheet.add_chart(chart1, "A1")
 
+    # === 📊 生命周期柱状图 ===
     sched_ws = wb["Container Schedule"]
     chart2 = BarChart()
     chart2.title = "每柜生命周期（天）"
-    chart2.y_axis.title = "生命周期（天）"
-    chart2.x_axis.title = "PO"
     chart2.height = 10
     chart2.width = 20
+
+    chart2.x_axis.title = "PO"
+
+    chart2.y_axis.title = "生命周期（天）"
     chart2.y_axis.tickLblPos = "low"
     chart2.y_axis.majorTickMark = "out"
     chart2.y_axis.majorGridlines = None
