@@ -18,7 +18,7 @@ warehouse_capacities = {
     'Default': 5
 }
 
-# 页面设置
+# 设置页面
 st.set_page_config(page_title="IJOOZ 仓库模拟器", page_icon="🍊", layout="centered")
 st.markdown('<p class="title-text">🍊 IJOOZ 仓库模拟器</p>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle-text">上传仓库使用计划 Excel 文件，自动计算库存及生命周期，并生成图表。</p>', unsafe_allow_html=True)
@@ -28,9 +28,9 @@ st.markdown("---")
 warehouse_options = list(warehouse_capacities.keys())
 warehouse_options.insert(0, '全部仓库')
 warehouse_name = st.selectbox("📍 选择仓库地点", warehouse_options, index=0)
-uploaded_file = st.file_uploader("📄 上传 Excel 文件", type=["xlsx", "xls"])
+uploaded_file = st.file_uploader("📤 上传 Excel 文件", type=["xlsx", "xls"])
 
-# 生成图表功能
+# 图表函数
 def add_charts_to_workbook(wb):
     if "Daily Inventory" not in wb.sheetnames or "Container Schedule" not in wb.sheetnames:
         return
@@ -77,8 +77,16 @@ def add_charts_to_workbook(wb):
     chart2.set_categories(categories2)
     chart_sheet.add_chart(chart2, "A20")
 
-# 单仓库模拟函数（省略原 run_simulation 代码，可粘贴你已有的）
-from your_simulation_module import run_simulation  # 或者粘贴完整 run_simulation 内容
+# 单仓库模拟函数（粘贴原来的 run_simulation 函数）
+def run_simulation(file, warehouse_name):
+    from warehouse_simulator import simulate_warehouse  # 替换为你的模拟逻辑函数
+    output = simulate_warehouse(file, warehouse_name)  # 获取 BytesIO
+    wb = load_workbook(output)
+    add_charts_to_workbook(wb)
+    final_output = BytesIO()
+    wb.save(final_output)
+    final_output.seek(0)
+    return final_output
 
 # 批量生成 + 打包 zip
 def run_all_simulations(file):
