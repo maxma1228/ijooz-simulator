@@ -35,6 +35,40 @@ def add_charts_to_workbook(wb):
     if "Daily Inventory" not in wb.sheetnames or "Container Schedule" not in wb.sheetnames:
         return
 
+    # ✅ 按“开始使用时间”排序 Container Schedule sheet
+    sched_df = pd.DataFrame(wb["Container Schedule"].values)
+    headers = sched_df.iloc[0].tolist()
+    sched_df = sched_df[1:]
+    sched_df.columns = headers
+    if "开始使用时间" in sched_df.columns:
+        sched_df = sched_df.sort_values(by="开始使用时间")
+
+    # 重写 sheet
+    wb.remove(wb["Container Schedule"])
+    ws_new = wb.create_sheet("Container Schedule")
+    for r_idx, row in enumerate([headers] + sched_df.values.tolist(), 1):
+        for c_idx, val in enumerate(row, 1):
+            ws_new.cell(row=r_idx, column=c_idx, value=val)
+
+    # ✅ 保留 Daily Inventory 的库存字段小数位
+    inv_ws = wb["Daily Inventory"]
+    inv_headers = [cell.value for cell in inv_ws[1]]
+    inv_data = []
+    for row in inv_ws.iter_rows(min_row=2, values_only=True):
+        row_dict = dict(zip(inv_headers, row))
+        for col in ["IJOOZ 仓库库存（单位）", "总库存（单位）"]:
+            if col in row_dict and isinstance(row_dict[col], (int, float)):
+                row_dict[col] = round(row_dict[col], 1)
+        inv_data.append(row_dict)
+
+    wb.remove(inv_ws)
+    new_inv_ws = wb.create_sheet("Daily Inventory")
+    for c_idx, col in enumerate(inv_headers, 1):
+        new_inv_ws.cell(row=1, column=c_idx, value=col)
+    for r_idx, row in enumerate(inv_data, 2):
+        for c_idx, col in enumerate(inv_headers, 1):
+            new_inv_ws.cell(row=r_idx, column=c_idx, value=row.get(col))
+
     chart_sheet = wb.create_sheet("Charts")
 
     # === 📈 每日库存趋势折线图 ===
@@ -86,6 +120,7 @@ def add_charts_to_workbook(wb):
     chart2.add_data(data2, titles_from_data=True)
     chart2.set_categories(categories2)
     chart_sheet.add_chart(chart2, "A20")
+
 
 # ✅ 单仓库模拟函数（完整版）
 def run_simulation(file, warehouse_name):
