@@ -15,16 +15,8 @@ warehouse_capacities = {
     'Default': 5
 }
 
-# 页面设置
+# 设置页面
 st.set_page_config(page_title="IJOOZ 仓库模拟器", page_icon="🍊", layout="centered")
-st.markdown("""
-    <style>
-    body { background: linear-gradient(135deg, #fff5e6, #ffe6cc); }
-    .title-text { font-size: 36px; font-weight: bold; color: #e68a00; }
-    .subtitle-text { font-size: 18px; color: #666666; }
-    </style>
-    """, unsafe_allow_html=True)
-
 st.markdown('<p class="title-text">🍊 IJOOZ 仓库模拟器</p>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle-text">上传仓库使用计划 Excel 文件，自动计算库存及生命周期，并生成图表。</p>', unsafe_allow_html=True)
 st.markdown("---")
@@ -35,32 +27,41 @@ warehouse_options.insert(0, '全部仓库')
 warehouse_name = st.selectbox("📍 选择仓库地点", warehouse_options, index=0)
 uploaded_file = st.file_uploader("📤 上传 Excel 文件", type=["xlsx", "xls"])
 
-# 添加图表的函数
+# ✅ 图表函数（修复坐标轴刻度）
 def add_charts_to_workbook(wb):
     if "Daily Inventory" not in wb.sheetnames or "Container Schedule" not in wb.sheetnames:
         return
     chart_sheet = wb.create_sheet("Charts")
 
-    # === 图1：每日库存趋势 ===
+    # === 库存趋势折线图 ===
     inv_ws = wb["Daily Inventory"]
     chart1 = LineChart()
     chart1.title = "每日库存趋势"
     chart1.y_axis.title = "库存单位数"
     chart1.x_axis.title = "日期"
+    chart1.height = 10
+    chart1.width = 20
+    chart1.x_axis.majorTickMark = "out"
+    chart1.x_axis.tickLblPos = "low"
+    chart1.y_axis.tickLblPos = "low"
+    chart1.y_axis.majorGridlines = None
     data = Reference(inv_ws, min_col=2, max_col=3, min_row=1, max_row=inv_ws.max_row)
     categories = Reference(inv_ws, min_col=1, min_row=2, max_row=inv_ws.max_row)
     chart1.add_data(data, titles_from_data=True)
     chart1.set_categories(categories)
-    chart1.height = 10
-    chart1.width = 20
     chart_sheet.add_chart(chart1, "A1")
 
-    # === 图2：生命周期柱状图 ===
+    # === 生命周期柱状图 ===
     sched_ws = wb["Container Schedule"]
     chart2 = BarChart()
     chart2.title = "每柜生命周期（天）"
-    chart2.y_axis.title = "生命周期"
+    chart2.y_axis.title = "生命周期（天）"
     chart2.x_axis.title = "PO"
+    chart2.height = 10
+    chart2.width = 20
+    chart2.y_axis.tickLblPos = "low"
+    chart2.y_axis.majorTickMark = "out"
+    chart2.y_axis.majorGridlines = None
 
     po_col, life_col = 1, 1
     for col in range(1, sched_ws.max_column + 1):
@@ -69,15 +70,13 @@ def add_charts_to_workbook(wb):
         if sched_ws.cell(1, col).value == "生命周期（天）":
             life_col = col
 
-    data = Reference(sched_ws, min_col=life_col, min_row=1, max_row=sched_ws.max_row)
-    categories = Reference(sched_ws, min_col=po_col, min_row=2, max_row=sched_ws.max_row)
-    chart2.add_data(data, titles_from_data=True)
-    chart2.set_categories(categories)
-    chart2.height = 10
-    chart2.width = 20
+    data2 = Reference(sched_ws, min_col=life_col, min_row=1, max_row=sched_ws.max_row)
+    categories2 = Reference(sched_ws, min_col=po_col, min_row=2, max_row=sched_ws.max_row)
+    chart2.add_data(data2, titles_from_data=True)
+    chart2.set_categories(categories2)
     chart_sheet.add_chart(chart2, "A20")
 
-# 单仓库模拟
+# ✅ 单仓库模拟函数
 def run_simulation(file, warehouse_name):
     ijooz_capacity = warehouse_capacities.get(warehouse_name, warehouse_capacities['Default'])
     xls = pd.ExcelFile(file)
@@ -88,7 +87,6 @@ def run_simulation(file, warehouse_name):
 
     container_df = xls.parse(container_sheet)
     weekly_usage_df = xls.parse(usage_sheet)
-
     weekly_usage_df[['year', 'week_number']] = weekly_usage_df['week'].str.extract(r'(\d{4})WK(\d{2})').astype(int)
     weekly_usage_df['monday'] = pd.to_datetime(weekly_usage_df['year'].astype(str) + '-W' + weekly_usage_df['week_number'].astype(str) + '-1', format='%Y-W%W-%w')
 
@@ -113,7 +111,7 @@ def run_simulation(file, warehouse_name):
         if eta is None:
             in_ijooz_date = daily_usage_df['date'].min()
         elif eta <= today:
-            pass  # 默认逻辑
+            pass
         containers.append({
             'index': idx,
             'PO': row['PO'],
@@ -195,7 +193,7 @@ def run_simulation(file, warehouse_name):
     inventory_df['日期'] = pd.to_datetime(inventory_df['日期']).dt.strftime('%Y-%m-%d')
     inventory_df['使用柜数量'] = inventory_df['当天使用的货柜 PO'].fillna('').apply(lambda x: len(str(x).split(',')) if x else 0)
 
-    # 写入 + 添加图表
+    # 写入 Excel 并加图表
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         schedule_df.to_excel(writer, index=False, sheet_name="Container Schedule")
@@ -208,28 +206,35 @@ def run_simulation(file, warehouse_name):
     final_output.seek(0)
     return final_output
 
-# 多仓库模拟
+# ✅ 所有仓库批量模拟（保留图表）
 def run_all_simulations(file):
     xls = pd.ExcelFile(file)
     available_warehouses = [name.replace("Container-", "") 
                             for name in xls.sheet_names 
                             if name.startswith("Container-")]
+
     final_output = BytesIO()
-    with pd.ExcelWriter(final_output, engine='openpyxl') as writer:
-        for wh in available_warehouses:
-            try:
-                output = run_simulation(file, wh)
-                temp = pd.ExcelFile(output)
-                for sheet_name in temp.sheet_names:
-                    df = temp.parse(sheet_name)
-                    safe_sheet = f"{wh[:12]}-{sheet_name[:18]}"
-                    df.to_excel(writer, index=False, sheet_name=safe_sheet)
-            except Exception as e:
-                st.warning(f"⚠️ 仓库 {wh} 模拟失败：{e}")
+    master_wb = load_workbook(BytesIO())  # 空 workbook
+    from openpyxl import Workbook
+    master_wb = Workbook()
+    master_wb.remove(master_wb.active)
+
+    for wh in available_warehouses:
+        try:
+            sim_output = run_simulation(file, wh)
+            wb = load_workbook(sim_output)
+            for sheet_name in wb.sheetnames:
+                sheet = wb[sheet_name]
+                sheet.title = f"{wh[:12]}-{sheet_name[:18]}"
+                master_wb._add_sheet(sheet)
+        except Exception as e:
+            st.warning(f"⚠️ 仓库 {wh} 模拟失败：{e}")
+
+    master_wb.save(final_output)
     final_output.seek(0)
     return final_output
 
-# 主逻辑入口
+# ✅ Streamlit 页面入口
 if uploaded_file and st.button("🚀 运行模拟"):
     try:
         today_str = datetime.date.today().strftime('%Y-%m-%d')
