@@ -12,10 +12,9 @@ from openpyxl.chart import LineChart, BarChart, Reference
 warehouse_capacities = {
     'Singapore': 16,
     'Tokyo': 15,
-    'Osaka': 5,
-    'Nagoya': 7,
-    'Fukuoka': 5,
-    'Default': 5
+    'Osaka': 4.5,
+    'Nagoya': 6,
+    'Fukuoka': 5
 }
 
 # 设置页面
