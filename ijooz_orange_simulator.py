@@ -101,7 +101,6 @@ def add_charts_to_workbook(wb):
     chart2.width = 20
 
     chart2.x_axis.title = "PO"
-
     chart2.y_axis.title = "生命周期（天）"
     chart2.y_axis.tickLblPos = "low"
     chart2.y_axis.majorTickMark = "out"
@@ -119,7 +118,6 @@ def add_charts_to_workbook(wb):
     chart2.add_data(data2, titles_from_data=True)
     chart2.set_categories(categories2)
     chart_sheet.add_chart(chart2, "A20")
-
 
 # ✅ 单仓库模拟函数（完整版）
 def run_simulation(file, warehouse_name):
