@@ -121,7 +121,10 @@ def add_charts_to_workbook(wb):
 
 # ✅ 单仓库模拟函数（完整版）
 def run_simulation(file, warehouse_name):
-    ijooz_capacity = warehouse_capacities.get(warehouse_name, warehouse_capacities['Default'])
+    if warehouse_name not in warehouse_capacities:
+        raise ValueError(f"未定义仓库容量：{warehouse_name}")
+    ijooz_capacity = warehouse_capacities[warehouse_name]
+
     xls = pd.ExcelFile(file)
     container_sheet = f"Container-{warehouse_name}"
     usage_sheet = f"weekly usage-{warehouse_name}"
