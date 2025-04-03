@@ -153,11 +153,12 @@ def run_simulation(file, warehouse_name):
     containers = []
     for idx, row in container_df.iterrows():
         eta = pd.to_datetime(row['ETA DATE']) if pd.notnull(row['ETA DATE']) else None
-        in_ijooz_date = None
+
         if eta is None:
-            in_ijooz_date = daily_usage_df['date'].min()
-        elif eta <= today:
-            pass
+            in_ijooz_date = today
+        else:
+            in_ijooz_date = None  # 后面通过 ETA + 3 判断
+
         containers.append({
             'index': idx,
             'PO': row['PO'],
@@ -168,7 +169,8 @@ def run_simulation(file, warehouse_name):
             'in_ijooz_date': in_ijooz_date,
             'start_use': None,
             'end_use': None,
-            'used': 0
+            'used': 0,
+            'can_enter_date': eta + pd.Timedelta(days=3) if eta is not None else today
         })
 
     ijooz_storage = [c for c in containers if c['in_ijooz_date'] is not None]
@@ -181,7 +183,7 @@ def run_simulation(file, warehouse_name):
         used_today = []
         for c in containers:
             if c['in_ijooz_date'] is None and c['in_ext_date'] is None:
-                if c['eta'] and c['eta'] + pd.Timedelta(days=3) <= day:
+                if c['can_enter_date'] <= day:
                     if used_capacity + c['unit'] <= ijooz_capacity:
                         c['in_ijooz_date'] = day
                         ijooz_storage.append(c)
@@ -225,6 +227,7 @@ def run_simulation(file, warehouse_name):
         'Harvest Day': c['harvest_day'],
         'ETA': c['eta'],
         '单位': c['unit'],
+        '可入仓时间（ETA+3）': c['can_enter_date'],
         '进外面冷库时间': c['in_ext_date'],
         '进IJOOZ仓库时间': c['in_ijooz_date'],
         '开始使用时间': c['start_use'],
@@ -232,7 +235,7 @@ def run_simulation(file, warehouse_name):
         '生命周期（天）': (c['start_use'] - c['harvest_day']).days if c['start_use'] else None
     } for c in containers])
 
-    for col in ['Harvest Day', 'ETA', '进外面冷库时间', '进IJOOZ仓库时间', '开始使用时间', '使用完的时间']:
+    for col in ['Harvest Day', 'ETA', '可入仓时间（ETA+3）', '进外面冷库时间', '进IJOOZ仓库时间', '开始使用时间', '使用完的时间']:
         schedule_df[col] = pd.to_datetime(schedule_df[col]).dt.strftime('%Y-%m-%d')
 
     inventory_df = pd.DataFrame(inventory_log)
