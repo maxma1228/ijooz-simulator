@@ -202,6 +202,11 @@ def run_simulation(file, warehouse_name):
         day_usage = daily_usage_df.loc[daily_usage_df['date'] == day, 'daily_usage'].sum()
         while day_usage > 0 and ijooz_storage:
             c = ijooz_storage[0]
+
+            # ✅ 跳过尚未真正入仓的柜子
+            if c['in_ijooz_date'] is not None and day < c['in_ijooz_date']:
+                break
+
             remaining = c['unit'] - c['used']
             if c['start_use'] is None:
                 c['start_use'] = day
@@ -253,34 +258,6 @@ def run_simulation(file, warehouse_name):
     wb.save(final_output)
     final_output.seek(0)
     return final_output
-
-# 批量生成 + 打包 zip
-def run_all_simulations(file):
-    xls = pd.ExcelFile(file)
-    available_warehouses = [name.replace("Container-", "") 
-                            for name in xls.sheet_names 
-                            if name.startswith("Container-")]
-
-    with tempfile.TemporaryDirectory() as tmpdirname:
-        excel_paths = []
-        for wh in available_warehouses:
-            try:
-                sim_output = run_simulation(file, wh)
-                filename = f"{wh}_simulation.xlsx"
-                file_path = os.path.join(tmpdirname, filename)
-                with open(file_path, "wb") as f:
-                    f.write(sim_output.read())
-                excel_paths.append(file_path)
-            except Exception as e:
-                st.warning(f"⚠️ 仓库 {wh} 模拟失败：{e}")
-
-        zip_output = BytesIO()
-        with zipfile.ZipFile(zip_output, "w") as zipf:
-            for path in excel_paths:
-                arcname = os.path.basename(path)
-                zipf.write(path, arcname=arcname)
-        zip_output.seek(0)
-        return zip_output
 
 # 主入口逻辑
 if uploaded_file and st.button("🚀 运行模拟"):
