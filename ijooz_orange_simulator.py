@@ -232,7 +232,6 @@ def run_simulation(file, warehouse_name):
         'Harvest Day': c['harvest_day'],
         'ETA': c['eta'],
         '单位': c['unit'],
-        '可入仓时间（ETA+3）': c['can_enter_date'],
         '进外面冷库时间': c['in_ext_date'],
         '进IJOOZ仓库时间': c['in_ijooz_date'],
         '开始使用时间': c['start_use'],
@@ -240,7 +239,7 @@ def run_simulation(file, warehouse_name):
         '生命周期（天）': (c['start_use'] - c['harvest_day']).days if c['start_use'] else None
     } for c in containers])
 
-    for col in ['Harvest Day', 'ETA', '可入仓时间（ETA+3）', '进外面冷库时间', '进IJOOZ仓库时间', '开始使用时间', '使用完的时间']:
+    for col in ['Harvest Day', 'ETA', '进外面冷库时间', '进IJOOZ仓库时间', '开始使用时间', '使用完的时间']:
         schedule_df[col] = pd.to_datetime(schedule_df[col]).dt.strftime('%Y-%m-%d')
 
     inventory_df = pd.DataFrame(inventory_log)
@@ -258,6 +257,7 @@ def run_simulation(file, warehouse_name):
     wb.save(final_output)
     final_output.seek(0)
     return final_output
+
 
 # 批量生成 + 打包 zip
 def run_all_simulations(file):
