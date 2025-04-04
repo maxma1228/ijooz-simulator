@@ -161,6 +161,7 @@ def run_simulation(file, warehouse_name):
         containers.append({
             'index': idx,
             'PO': row['PO'],
+            'Vessel': row.get('Vessel', ''),
             'harvest_day': pd.to_datetime(row['HARVEST DAY']),
             'eta': eta,
             'unit': float(row['单位']),
@@ -230,12 +231,14 @@ def run_simulation(file, warehouse_name):
         })
 
     schedule_df = pd.DataFrame([{
+        'Vessel': c['Vessel'],
         'PO': c['PO'],
         'Harvest Day': c['harvest_day'],
         'ETA': c['eta'],
         '单位': c['unit'],
         '进外面冷库时间': c['in_ext_date'],
         '进IJOOZ仓库时间': c['in_ijooz_date'],
+        '外面冷库天数': (c['in_ijooz_date'] - c['in_ext_date']).days if c['in_ext_date'] and c['in_ijooz_date'] else None,
         '开始使用时间': c['start_use'],
         '使用完的时间': c['end_use'],
         '生命周期（天）': (c['start_use'] - c['harvest_day']).days if c['start_use'] else None
@@ -259,6 +262,7 @@ def run_simulation(file, warehouse_name):
     wb.save(final_output)
     final_output.seek(0)
     return final_output
+
 
 # 批量生成 + 打包 zip
 def run_all_simulations(file):
