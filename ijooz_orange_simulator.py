@@ -119,7 +119,6 @@ def add_charts_to_workbook(wb):
     chart2.set_categories(categories2)
     chart_sheet.add_chart(chart2, "A20")
 
-# ✅ 单仓库模拟函数（完整版）
 def run_simulation(file, warehouse_name):
     if warehouse_name not in warehouse_capacities:
         raise ValueError(f"未定义仓库容量：{warehouse_name}")
@@ -192,6 +191,9 @@ def run_simulation(file, warehouse_name):
                         c['in_ext_date'] = day
                         external_storage.append(c)
 
+        # ✅ 外部冷库按在外时间排序（越久优先）
+        external_storage.sort(key=lambda x: x['in_ext_date'])
+
         for c in external_storage[:]:
             if used_capacity + c['unit'] <= ijooz_capacity:
                 c['in_ijooz_date'] = day
@@ -257,7 +259,6 @@ def run_simulation(file, warehouse_name):
     wb.save(final_output)
     final_output.seek(0)
     return final_output
-
 
 # 批量生成 + 打包 zip
 def run_all_simulations(file):
