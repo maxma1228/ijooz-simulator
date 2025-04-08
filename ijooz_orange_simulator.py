@@ -11,9 +11,9 @@ from openpyxl.chart import LineChart, BarChart, Reference
 # === 仓库容量配置 ===
 warehouse_capacities = {
     'Singapore': 16,
-    'Tokyo': 15,
+    'Tokyo': 16,
     'Osaka': 4.5,
-    'Nagoya': 6,
+    'Nagoya': 5,
     'Fukuoka': 5
 }
 
