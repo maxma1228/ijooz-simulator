@@ -133,8 +133,8 @@ def run_simulation(file, warehouse_name):
     container_df = xls.parse(container_sheet)
     weekly_usage_df = xls.parse(usage_sheet)
     weekly_usage_df[['year', 'week_number']] = weekly_usage_df['week'].str.extract(r'(\d{4})WK(\d{2})').astype(int)
-    weekly_usage_df['monday'] = pd.to_datetime(weekly_usage_df['year'].astype(str) + '-W' + weekly_usage_df['week_number'].astype(str) + '-1', format='%Y-W%W-%w')
-
+    weekly_usage_df['monday'] = pd.to_datetime(weekly_usage_df['year'].astype(str) + weekly_usage_df['week_number'].astype(str) + '1',format='%G%V%u')
+    
     daily_usage_records = []
     for _, row in weekly_usage_df.iterrows():
         daily_usage = row['用量'] / 7
