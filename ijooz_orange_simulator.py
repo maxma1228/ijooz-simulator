@@ -177,7 +177,8 @@ def run_simulation(file, warehouse_name):
     external_storage = []
     used_capacity = sum(c['unit'] for c in ijooz_storage)
     inventory_log = []
-    date_range = pd.date_range(start=daily_usage_df['date'].min(), end=daily_usage_df['date'].max())
+    today = pd.Timestamp(datetime.date.today())
+    date_range = pd.date_range(start=today, end=daily_usage_df['date'].max())
 
     for day in date_range:
         used_today = []
