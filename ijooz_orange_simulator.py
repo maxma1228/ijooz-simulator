@@ -290,20 +290,39 @@ def run_all_simulations(file):
         return zip_output
 
         
-# 主入口逻辑
+# === 页面设置 ===
+st.set_page_config(page_title="IJOOZ 仓库模拟器", page_icon="🍊", layout="centered")
+st.markdown('<p class="title-text">🍊 IJOOZ 仓库模拟器</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle-text">上传仓库使用计划 Excel 文件，自动计算库存及生命周期，并生成图表。</p>', unsafe_allow_html=True)
+st.markdown("---")
+
+# === 仓库选项 ===
+warehouse_options = list(warehouse_capacities.keys())
+warehouse_options.insert(0, '全部仓库')
+warehouse_name = st.selectbox("📍 选择仓库地点", warehouse_options, index=0)
+
+# === 文件上传组件 ===
+uploaded_file = st.file_uploader("📤 上传 Excel 文件", type=["xlsx", "xls"])
+
+# === 主执行逻辑 ===
 if uploaded_file and st.button("🚀 运行模拟"):
     try:
         today_str = datetime.date.today().strftime('%Y-%m-%d')
         with st.spinner("模拟进行中，请稍候..."):
+
+            # ✅ 全部仓库逻辑
             if warehouse_name == '全部仓库':
                 output_zip = run_all_simulations(uploaded_file)
                 filename = f"IJOOZ_Simulation_ALL_{today_str}.zip"
                 st.success("✅ 所有仓库模拟完成！点击下方按钮下载所有结果：")
                 st.download_button("📦 下载 ZIP 文件", data=output_zip, file_name=filename, mime="application/zip")
+
+            # ✅ 单仓库逻辑
             else:
                 output_excel = run_simulation(uploaded_file, warehouse_name)
                 filename = f"IJOOZ_Simulation_{warehouse_name}_{today_str}.xlsx"
                 st.success("✅ 模拟完成！点击下方按钮下载结果：")
                 st.download_button("📥 下载 Excel 文件", data=output_excel, file_name=filename)
+
     except Exception as e:
         st.error(f"❌ 出错了：{str(e)}")
