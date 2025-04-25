@@ -273,19 +273,52 @@ def run_all_simulations(file):
                             for name in xls.sheet_names 
                             if name.startswith("Container-")]
 
+    import pandas as pd
+    all_inventory_dfs = []
+    japan_warehouses = ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]
+
     with tempfile.TemporaryDirectory() as tmpdirname:
         excel_paths = []
         for wh in available_warehouses:
             try:
-                sim_output = run_simulation(file, wh)
+                result = run_simulation(file, wh)
+
+                # 如果是日本四仓库，返回 inventory_df 和 excel 文件
+                if isinstance(result, tuple):
+                    inventory_df, sim_output = result
+                    all_inventory_dfs.append(inventory_df)
+                else:
+                    sim_output = result
+
                 filename = f"{wh}_simulation.xlsx"
                 file_path = os.path.join(tmpdirname, filename)
                 with open(file_path, "wb") as f:
                     f.write(sim_output.read())
                 excel_paths.append(file_path)
+
             except Exception as e:
                 st.warning(f"⚠️ 仓库 {wh} 模拟失败：{e}")
 
+        # ✅ 汇总日本仓库的 Daily Inventory
+        if all_inventory_dfs:
+            combined = pd.concat(all_inventory_dfs)
+            combined["日期"] = pd.to_datetime(combined["日期"])
+            grouped = combined.groupby("日期", as_index=False).agg({
+                "IJOOZ 仓库库存（单位）": "sum",
+                "外部冷库库存（整柜数）": "sum",
+                "使用柜数量": "sum",
+                "运输中（单位）": "sum",
+                "当天使用的货柜 PO": lambda x: ', '.join(filter(None, map(str, x))),
+                "daily_usage": "sum"
+            })
+            grouped["日期"] = grouped["日期"].dt.strftime("%Y-%m-%d")
+
+            japan_path = os.path.join(tmpdirname, "Japan_Daily_Inventory.xlsx")
+            with pd.ExcelWriter(japan_path, engine="openpyxl") as writer:
+                grouped.to_excel(writer, index=False, sheet_name="Japan Daily Inventory")
+            excel_paths.append(japan_path)
+
+        # ✅ 打包所有文件为 ZIP
         zip_output = BytesIO()
         with zipfile.ZipFile(zip_output, "w") as zipf:
             for path in excel_paths:
@@ -293,6 +326,7 @@ def run_all_simulations(file):
                 zipf.write(path, arcname=arcname)
         zip_output.seek(0)
         return zip_output
+        
 # 主入口逻辑
 if uploaded_file and st.button("🚀 运行模拟"):
     try:
