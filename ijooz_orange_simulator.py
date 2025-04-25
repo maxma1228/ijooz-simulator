@@ -272,8 +272,6 @@ def run_all_simulations(file):
     available_warehouses = [name.replace("Container-", "") 
                             for name in xls.sheet_names 
                             if name.startswith("Container-")]
-
-    import pandas as pd
     all_inventory_dfs = []
     japan_warehouses = ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]
 
