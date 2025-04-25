@@ -262,16 +262,24 @@ def run_simulation(file, warehouse_name):
     add_charts_to_workbook(wb)
     final_output = BytesIO()
     wb.save(final_output)
-    final_output.seek(0)
+final_output.seek(0)
+
+# ✅ 只有在“运行全部仓库”模式下，且当前是日本仓库，才返回两个值
+if st.session_state.get("run_all_mode") and warehouse_name in ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]:
+    return inventory_df, final_output
+else:
     return final_output
 
 
 # 批量生成 + 打包 zip
 def run_all_simulations(file):
+    st.session_state["run_all_mode"] = True
+
     xls = pd.ExcelFile(file)
     available_warehouses = [name.replace("Container-", "") 
                             for name in xls.sheet_names 
                             if name.startswith("Container-")]
+
     all_inventory_dfs = []
     japan_warehouses = ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]
 
@@ -281,7 +289,6 @@ def run_all_simulations(file):
             try:
                 result = run_simulation(file, wh)
 
-                # 如果是日本四仓库，返回 inventory_df 和 excel 文件
                 if isinstance(result, tuple):
                     inventory_df, sim_output = result
                     all_inventory_dfs.append(inventory_df)
@@ -297,7 +304,7 @@ def run_all_simulations(file):
             except Exception as e:
                 st.warning(f"⚠️ 仓库 {wh} 模拟失败：{e}")
 
-        # ✅ 汇总日本仓库的 Daily Inventory
+        # ✅ 汇总日本 Daily Inventory
         if all_inventory_dfs:
             combined = pd.concat(all_inventory_dfs)
             combined["日期"] = pd.to_datetime(combined["日期"])
@@ -306,8 +313,8 @@ def run_all_simulations(file):
                 "外部冷库库存（整柜数）": "sum",
                 "使用柜数量": "sum",
                 "运输中（单位）": "sum",
-                "当天使用的货柜 PO": lambda x: ', '.join(filter(None, map(str, x))),
-                "daily_usage": "sum"
+                "daily_usage": "sum",
+                "当天使用的货柜 PO": lambda x: ', '.join(filter(None, map(str, x)))
             })
             grouped["日期"] = grouped["日期"].dt.strftime("%Y-%m-%d")
 
@@ -316,7 +323,6 @@ def run_all_simulations(file):
                 grouped.to_excel(writer, index=False, sheet_name="Japan Daily Inventory")
             excel_paths.append(japan_path)
 
-        # ✅ 打包所有文件为 ZIP
         zip_output = BytesIO()
         with zipfile.ZipFile(zip_output, "w") as zipf:
             for path in excel_paths:
