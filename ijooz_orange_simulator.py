@@ -224,14 +224,18 @@ def run_simulation(file, warehouse_name):
         in_transit_units = sum(c['unit'] for c in containers if c['eta'] and c['eta'] > day)
 
         inventory_log.append({
-        '日期': day,
-        'IJOOZ 仓库库存（单位）': sum(c['unit'] - c['used'] for c in ijooz_storage),
-        '外部冷库库存（整柜数）': len(external_storage),
-        '当天使用的货柜 PO': ', '.join(set(used_today)),
-        '总库存（单位）': sum(c['unit'] - c['used'] for c in ijooz_storage) + sum(c['unit'] for c in external_storage),
-        '运输中（单位）': sum(c['unit'] for c in containers if c['eta'] and c['eta'].date() > day.date()),  # ✅ 新加列
-        'daily_usage': daily_usage_df.loc[daily_usage_df['date'] == day, 'daily_usage'].sum()  # ✅ 新加列
-    })
+    '日期': day,
+    'IJOOZ 仓库库存（单位）': round(sum(c['unit'] - c['used'] for c in ijooz_storage), 1),
+    '外部冷库库存（整柜数）': len(external_storage),
+    '当天使用的货柜 PO': ', '.join(set(used_today)),
+    '使用柜数量': len(set(used_today)),  # ✅ 加上这行
+    '总库存（单位）': round(
+        sum(c['unit'] - c['used'] for c in ijooz_storage) + 
+        sum(c['unit'] for c in external_storage), 1
+    ),
+    '运输中（单位）': round(sum(c['unit'] for c in containers if c['eta'] and c['eta'].date() > day.date()), 1),
+    'daily_usage': round(day_usage_original, 2)
+})
 
     schedule_df = pd.DataFrame([{
         'Vessel': c['Vessel'],
