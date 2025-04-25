@@ -1,12 +1,12 @@
-import streamlit as st
 import pandas as pd
 import datetime
 from io import BytesIO
+from openpyxl import load_workbook
+from openpyxl.chart import LineChart, BarChart, Reference
 import zipfile
 import os
 import tempfile
-from openpyxl import load_workbook
-from openpyxl.chart import LineChart, BarChart, Reference
+import streamlit as st
 
 # === 仓库容量配置 ===
 warehouse_capacities = {
@@ -17,24 +17,11 @@ warehouse_capacities = {
     'Fukuoka': 5
 }
 
-# 设置页面
-st.set_page_config(page_title="IJOOZ 仓库模拟器", page_icon="🍊", layout="centered")
-st.markdown('<p class="title-text">🍊 IJOOZ 仓库模拟器</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle-text">上传仓库使用计划 Excel 文件，自动计算库存及生命周期，并生成图表。</p>', unsafe_allow_html=True)
-st.markdown("---")
-
-# 选择仓库
-warehouse_options = list(warehouse_capacities.keys())
-warehouse_options.insert(0, '全部仓库')
-warehouse_name = st.selectbox("📍 选择仓库地点", warehouse_options, index=0)
-uploaded_file = st.file_uploader("📤 上传 Excel 文件", type=["xlsx", "xls"])
-
 # 图表函数
 def add_charts_to_workbook(wb):
     if "Daily Inventory" not in wb.sheetnames or "Container Schedule" not in wb.sheetnames:
         return
 
-    # ✅ 按“开始使用时间”排序 Container Schedule sheet
     sched_df = pd.DataFrame(wb["Container Schedule"].values)
     headers = sched_df.iloc[0].tolist()
     sched_df = sched_df[1:]
@@ -42,14 +29,12 @@ def add_charts_to_workbook(wb):
     if "开始使用时间" in sched_df.columns:
         sched_df = sched_df.sort_values(by="开始使用时间")
 
-    # 重写 sheet
     wb.remove(wb["Container Schedule"])
     ws_new = wb.create_sheet("Container Schedule")
     for r_idx, row in enumerate([headers] + sched_df.values.tolist(), 1):
         for c_idx, val in enumerate(row, 1):
             ws_new.cell(row=r_idx, column=c_idx, value=val)
 
-    # ✅ 保留 Daily Inventory 的库存字段小数位
     inv_ws = wb["Daily Inventory"]
     inv_headers = [cell.value for cell in inv_ws[1]]
     inv_data = []
@@ -70,54 +55,46 @@ def add_charts_to_workbook(wb):
 
     chart_sheet = wb.create_sheet("Charts")
 
-    # === 📈 每日库存趋势折线图 ===
-    inv_ws = wb["Daily Inventory"]
     chart1 = LineChart()
     chart1.title = "每日库存趋势"
     chart1.height = 10
     chart1.width = 20
-
     chart1.x_axis.title = "日期"
     chart1.x_axis.majorTickMark = "out"
     chart1.x_axis.tickLblPos = "low"
     chart1.x_axis.numFmt = "yyyy-mm-dd"
-
     chart1.y_axis.title = "库存单位数"
     chart1.y_axis.tickLblPos = "low"
     chart1.y_axis.majorTickMark = "out"
     chart1.y_axis.majorGridlines = None
-
-    data = Reference(inv_ws, min_col=2, max_col=3, min_row=1, max_row=inv_ws.max_row)
-    categories = Reference(inv_ws, min_col=1, min_row=2, max_row=inv_ws.max_row)
+    data = Reference(new_inv_ws, min_col=2, max_col=3, min_row=1, max_row=new_inv_ws.max_row)
+    categories = Reference(new_inv_ws, min_col=1, min_row=2, max_row=new_inv_ws.max_row)
     chart1.add_data(data, titles_from_data=True)
     chart1.set_categories(categories)
     chart_sheet.add_chart(chart1, "A1")
 
-    # === 📊 生命周期柱状图 ===
     sched_ws = wb["Container Schedule"]
     chart2 = BarChart()
     chart2.title = "每柜生命周期（天）"
     chart2.height = 10
     chart2.width = 20
-
     chart2.x_axis.title = "PO"
     chart2.y_axis.title = "生命周期（天）"
     chart2.y_axis.tickLblPos = "low"
     chart2.y_axis.majorTickMark = "out"
     chart2.y_axis.majorGridlines = None
-
     po_col, life_col = 1, 1
     for col in range(1, sched_ws.max_column + 1):
         if sched_ws.cell(1, col).value == "PO":
             po_col = col
         if sched_ws.cell(1, col).value == "生命周期（天）":
             life_col = col
-
     data2 = Reference(sched_ws, min_col=life_col, min_row=1, max_row=sched_ws.max_row)
     categories2 = Reference(sched_ws, min_col=po_col, min_row=2, max_row=sched_ws.max_row)
     chart2.add_data(data2, titles_from_data=True)
     chart2.set_categories(categories2)
     chart_sheet.add_chart(chart2, "A20")
+
 
 def run_simulation(file, warehouse_name):
     if warehouse_name not in warehouse_capacities:
@@ -133,10 +110,7 @@ def run_simulation(file, warehouse_name):
     container_df = xls.parse(container_sheet)
     weekly_usage_df = xls.parse(usage_sheet)
     weekly_usage_df[['year', 'week_number']] = weekly_usage_df['week'].str.extract(r'(\d{4})WK(\d{2})').astype(int)
-    weekly_usage_df['monday'] = pd.to_datetime(
-        weekly_usage_df['year'].astype(str) + weekly_usage_df['week_number'].astype(str) + '1',
-        format='%G%V%u'
-    )
+    weekly_usage_df['monday'] = pd.to_datetime(weekly_usage_df['year'].astype(str) + weekly_usage_df['week_number'].astype(str) + '1', format='%G%V%u')
 
     daily_usage_records = []
     for _, row in weekly_usage_df.iterrows():
@@ -155,12 +129,6 @@ def run_simulation(file, warehouse_name):
     containers = []
     for idx, row in container_df.iterrows():
         eta = pd.to_datetime(row['ETA DATE']) if pd.notnull(row['ETA DATE']) else None
-
-        if eta is None:
-            in_ijooz_date = today
-        else:
-            in_ijooz_date = None
-
         containers.append({
             'index': idx,
             'PO': row['PO'],
@@ -169,7 +137,7 @@ def run_simulation(file, warehouse_name):
             'eta': eta,
             'unit': float(row['单位']),
             'in_ext_date': None,
-            'in_ijooz_date': in_ijooz_date,
+            'in_ijooz_date': today if eta is None else None,
             'start_use': None,
             'end_use': None,
             'used': 0,
@@ -196,7 +164,6 @@ def run_simulation(file, warehouse_name):
                         external_storage.append(c)
 
         external_storage.sort(key=lambda x: x['in_ext_date'])
-
         for c in external_storage[:]:
             if used_capacity + c['unit'] <= ijooz_capacity:
                 c['in_ijooz_date'] = day
@@ -205,6 +172,7 @@ def run_simulation(file, warehouse_name):
                 external_storage.remove(c)
 
         day_usage = daily_usage_df.loc[daily_usage_df['date'] == day, 'daily_usage'].sum()
+        day_usage_original = day_usage
         while day_usage > 0 and ijooz_storage:
             c = ijooz_storage[0]
             if c['in_ijooz_date'] is not None and day < c['in_ijooz_date']:
@@ -221,21 +189,16 @@ def run_simulation(file, warehouse_name):
                 ijooz_storage.pop(0)
             used_today.append(c['PO'])
 
-        in_transit_units = sum(c['unit'] for c in containers if c['eta'] and c['eta'] > day)
-
         inventory_log.append({
-    '日期': day,
-    'IJOOZ 仓库库存（单位）': round(sum(c['unit'] - c['used'] for c in ijooz_storage), 1),
-    '外部冷库库存（整柜数）': len(external_storage),
-    '当天使用的货柜 PO': ', '.join(set(used_today)),
-    '使用柜数量': len(set(used_today)),  # ✅ 加上这行
-    '总库存（单位）': round(
-        sum(c['unit'] - c['used'] for c in ijooz_storage) + 
-        sum(c['unit'] for c in external_storage), 1
-    ),
-    '运输中（单位）': round(sum(c['unit'] for c in containers if c['eta'] and c['eta'].date() > day.date()), 1),
-    'daily_usage': round(day_usage_original, 2)
-})
+            '日期': day,
+            'IJOOZ 仓库库存（单位）': round(sum(c['unit'] - c['used'] for c in ijooz_storage), 1),
+            '外部冷库库存（整柜数）': len(external_storage),
+            '当天使用的货柜 PO': ', '.join(set(used_today)),
+            '使用柜数量': len(set(used_today)),
+            '总库存（单位）': round(sum(c['unit'] - c['used'] for c in ijooz_storage) + sum(c['unit'] for c in external_storage), 1),
+            '运输中（单位）': round(sum(c['unit'] for c in containers if c['eta'] and c['eta'].date() > day.date()), 1),
+            'daily_usage': round(day_usage_original, 2)
+        })
 
     schedule_df = pd.DataFrame([{
         'Vessel': c['Vessel'],
@@ -267,30 +230,25 @@ def run_simulation(file, warehouse_name):
     final_output = BytesIO()
     wb.save(final_output)
     final_output.seek(0)
+
     if st.session_state.get("run_all_mode") and warehouse_name in ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]:
-       return inventory_df, final_output
+        return inventory_df, final_output
     else:
-       return final_output
+        return final_output
 
 
-# 批量生成 + 打包 zip
 def run_all_simulations(file):
     st.session_state["run_all_mode"] = True
 
     xls = pd.ExcelFile(file)
-    available_warehouses = [name.replace("Container-", "") 
-                            for name in xls.sheet_names 
-                            if name.startswith("Container-")]
+    available_warehouses = [name.replace("Container-", "") for name in xls.sheet_names if name.startswith("Container-")]
 
     all_inventory_dfs = []
-    japan_warehouses = ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]
-
     with tempfile.TemporaryDirectory() as tmpdirname:
         excel_paths = []
         for wh in available_warehouses:
             try:
                 result = run_simulation(file, wh)
-
                 if isinstance(result, tuple):
                     inventory_df, sim_output = result
                     all_inventory_dfs.append(inventory_df)
@@ -302,11 +260,9 @@ def run_all_simulations(file):
                 with open(file_path, "wb") as f:
                     f.write(sim_output.read())
                 excel_paths.append(file_path)
-
             except Exception as e:
                 st.warning(f"⚠️ 仓库 {wh} 模拟失败：{e}")
 
-        # ✅ 汇总日本 Daily Inventory
         if all_inventory_dfs:
             combined = pd.concat(all_inventory_dfs)
             combined["日期"] = pd.to_datetime(combined["日期"])
@@ -332,6 +288,7 @@ def run_all_simulations(file):
                 zipf.write(path, arcname=arcname)
         zip_output.seek(0)
         return zip_output
+
         
 # 主入口逻辑
 if uploaded_file and st.button("🚀 运行模拟"):
