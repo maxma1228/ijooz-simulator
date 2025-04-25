@@ -262,13 +262,11 @@ def run_simulation(file, warehouse_name):
     add_charts_to_workbook(wb)
     final_output = BytesIO()
     wb.save(final_output)
-final_output.seek(0)
-
-# ✅ 只有在“运行全部仓库”模式下，且当前是日本仓库，才返回两个值
-if st.session_state.get("run_all_mode") and warehouse_name in ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]:
-    return inventory_df, final_output
-else:
-    return final_output
+    final_output.seek(0)
+    if st.session_state.get("run_all_mode") and warehouse_name in ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]:
+       return inventory_df, final_output
+    else:
+       return final_output
 
 
 # 批量生成 + 打包 zip
