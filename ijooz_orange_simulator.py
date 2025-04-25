@@ -133,8 +133,11 @@ def run_simulation(file, warehouse_name):
     container_df = xls.parse(container_sheet)
     weekly_usage_df = xls.parse(usage_sheet)
     weekly_usage_df[['year', 'week_number']] = weekly_usage_df['week'].str.extract(r'(\d{4})WK(\d{2})').astype(int)
-    weekly_usage_df['monday'] = pd.to_datetime(weekly_usage_df['year'].astype(str) + weekly_usage_df['week_number'].astype(str) + '1',format='%G%V%u')
-    
+    weekly_usage_df['monday'] = pd.to_datetime(
+        weekly_usage_df['year'].astype(str) + weekly_usage_df['week_number'].astype(str) + '1',
+        format='%G%V%u'
+    )
+
     daily_usage_records = []
     for _, row in weekly_usage_df.iterrows():
         daily_usage = row['用量'] / 7
@@ -156,7 +159,7 @@ def run_simulation(file, warehouse_name):
         if eta is None:
             in_ijooz_date = today
         else:
-            in_ijooz_date = None  # 后面通过 ETA + 3 判断
+            in_ijooz_date = None
 
         containers.append({
             'index': idx,
@@ -177,7 +180,6 @@ def run_simulation(file, warehouse_name):
     external_storage = []
     used_capacity = sum(c['unit'] for c in ijooz_storage)
     inventory_log = []
-    today = pd.Timestamp(datetime.date.today())
     date_range = pd.date_range(start=today, end=daily_usage_df['date'].max())
 
     for day in date_range:
@@ -193,7 +195,6 @@ def run_simulation(file, warehouse_name):
                         c['in_ext_date'] = day
                         external_storage.append(c)
 
-        # ✅ 外部冷库按在外时间排序（越久优先）
         external_storage.sort(key=lambda x: x['in_ext_date'])
 
         for c in external_storage[:]:
@@ -206,11 +207,8 @@ def run_simulation(file, warehouse_name):
         day_usage = daily_usage_df.loc[daily_usage_df['date'] == day, 'daily_usage'].sum()
         while day_usage > 0 and ijooz_storage:
             c = ijooz_storage[0]
-
-            # ✅ 跳过尚未真正入仓的柜子
             if c['in_ijooz_date'] is not None and day < c['in_ijooz_date']:
                 break
-
             remaining = c['unit'] - c['used']
             if c['start_use'] is None:
                 c['start_use'] = day
@@ -223,12 +221,16 @@ def run_simulation(file, warehouse_name):
                 ijooz_storage.pop(0)
             used_today.append(c['PO'])
 
+        in_transit_units = sum(c['unit'] for c in containers if c['eta'] and c['eta'] > day)
+
         inventory_log.append({
             '日期': day,
             'IJOOZ 仓库库存（单位）': sum(c['unit'] - c['used'] for c in ijooz_storage),
             '外部冷库库存（整柜数）': len(external_storage),
             '当天使用的货柜 PO': ', '.join(set(used_today)),
-            '总库存（单位）': sum(c['unit'] - c['used'] for c in ijooz_storage) + sum(c['unit'] for c in external_storage)
+            '总库存（单位）': sum(c['unit'] - c['used'] for c in ijooz_storage) + sum(c['unit'] for c in external_storage),
+            '使用柜数量': len(set(used_today)),
+            '运输中（单位）': in_transit_units
         })
 
     schedule_df = pd.DataFrame([{
@@ -250,7 +252,6 @@ def run_simulation(file, warehouse_name):
 
     inventory_df = pd.DataFrame(inventory_log)
     inventory_df['日期'] = pd.to_datetime(inventory_df['日期']).dt.strftime('%Y-%m-%d')
-    inventory_df['使用柜数量'] = inventory_df['当天使用的货柜 PO'].fillna('').apply(lambda x: len(str(x).split(',')) if x else 0)
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
