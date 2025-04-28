@@ -1,12 +1,12 @@
 import pandas as pd
 import datetime
 from io import BytesIO
-from openpyxl import load_workbook
-from openpyxl.chart import LineChart, BarChart, Reference
 import zipfile
 import os
 import tempfile
 import streamlit as st
+from openpyxl import load_workbook
+from openpyxl.chart import LineChart, BarChart, Reference
 
 # === 仓库容量配置 ===
 warehouse_capacities = {
@@ -17,7 +17,7 @@ warehouse_capacities = {
     'Fukuoka': 5
 }
 
-# 图表函数
+# === 图表函数 ===
 def add_charts_to_workbook(wb):
     if "Daily Inventory" not in wb.sheetnames or "Container Schedule" not in wb.sheetnames:
         return
@@ -60,13 +60,8 @@ def add_charts_to_workbook(wb):
     chart1.height = 10
     chart1.width = 20
     chart1.x_axis.title = "日期"
-    chart1.x_axis.majorTickMark = "out"
-    chart1.x_axis.tickLblPos = "low"
     chart1.x_axis.numFmt = "yyyy-mm-dd"
     chart1.y_axis.title = "库存单位数"
-    chart1.y_axis.tickLblPos = "low"
-    chart1.y_axis.majorTickMark = "out"
-    chart1.y_axis.majorGridlines = None
     data = Reference(new_inv_ws, min_col=2, max_col=3, min_row=1, max_row=new_inv_ws.max_row)
     categories = Reference(new_inv_ws, min_col=1, min_row=2, max_row=new_inv_ws.max_row)
     chart1.add_data(data, titles_from_data=True)
@@ -78,11 +73,6 @@ def add_charts_to_workbook(wb):
     chart2.title = "每柜生命周期（天）"
     chart2.height = 10
     chart2.width = 20
-    chart2.x_axis.title = "PO"
-    chart2.y_axis.title = "生命周期（天）"
-    chart2.y_axis.tickLblPos = "low"
-    chart2.y_axis.majorTickMark = "out"
-    chart2.y_axis.majorGridlines = None
     po_col, life_col = 1, 1
     for col in range(1, sched_ws.max_column + 1):
         if sched_ws.cell(1, col).value == "PO":
@@ -95,7 +85,7 @@ def add_charts_to_workbook(wb):
     chart2.set_categories(categories2)
     chart_sheet.add_chart(chart2, "A20")
 
-
+# === 单仓库模拟函数 ===
 def run_simulation(file, warehouse_name):
     if warehouse_name not in warehouse_capacities:
         raise ValueError(f"未定义仓库容量：{warehouse_name}")
@@ -110,7 +100,9 @@ def run_simulation(file, warehouse_name):
     container_df = xls.parse(container_sheet)
     weekly_usage_df = xls.parse(usage_sheet)
     weekly_usage_df[['year', 'week_number']] = weekly_usage_df['week'].str.extract(r'(\d{4})WK(\d{2})').astype(int)
-    weekly_usage_df['monday'] = pd.to_datetime(weekly_usage_df['year'].astype(str) + weekly_usage_df['week_number'].astype(str) + '1', format='%G%V%u')
+    weekly_usage_df['monday'] = pd.to_datetime(
+        weekly_usage_df['year'].astype(str) + weekly_usage_df['week_number'].astype(str) + '1', format='%G%V%u'
+    )
 
     daily_usage_records = []
     for _, row in weekly_usage_df.iterrows():
@@ -208,35 +200,48 @@ def run_simulation(file, warehouse_name):
         '单位': c['unit'],
         '进外面冷库时间': c['in_ext_date'],
         '进IJOOZ仓库时间': c['in_ijooz_date'],
-        '外面冷库天数': (c['in_ijooz_date'] - c['in_ext_date']).days if c['in_ext_date'] and c['in_ijooz_date'] else None,
         '开始使用时间': c['start_use'],
         '使用完的时间': c['end_use'],
         '生命周期（天）': (c['start_use'] - c['harvest_day']).days if c['start_use'] else None
     } for c in containers])
 
-    for col in ['Harvest Day', 'ETA', '进外面冷库时间', '进IJOOZ仓库时间', '开始使用时间', '使用完的时间']:
-        schedule_df[col] = pd.to_datetime(schedule_df[col]).dt.strftime('%Y-%m-%d')
-
     inventory_df = pd.DataFrame(inventory_log)
     inventory_df['日期'] = pd.to_datetime(inventory_df['日期']).dt.strftime('%Y-%m-%d')
+    schedule_df['Harvest Day'] = pd.to_datetime(schedule_df['Harvest Day']).dt.strftime('%Y-%m-%d')
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         schedule_df.to_excel(writer, index=False, sheet_name="Container Schedule")
         inventory_df.to_excel(writer, index=False, sheet_name="Daily Inventory")
+
     output.seek(0)
     wb = load_workbook(output)
+
+    # 添加 Charts
     add_charts_to_workbook(wb)
-    final_output = BytesIO()
-    wb.save(final_output)
-    final_output.seek(0)
 
-    if st.session_state.get("run_all_mode") and warehouse_name in ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]:
-        return inventory_df, final_output
-    else:
-        return final_output
+    # 添加单仓库 Weekly Summary
+    inventory_df["日期"] = pd.to_datetime(inventory_df["日期"])
+    inventory_df["year"] = inventory_df["日期"].dt.isocalendar().year
+    inventory_df["week"] = inventory_df["日期"].dt.isocalendar().week
+    weekly_summary = inventory_df.groupby(["year", "week"]).agg({
+        "IJOOZ 仓库库存（单位）": "mean",
+        "外部冷库库存（整柜数）": "mean",
+        "使用柜数量": "sum",
+        "运输中（单位）": "mean",
+        "daily_usage": "sum"
+    }).reset_index()
+
+    with pd.ExcelWriter(output, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
+        weekly_summary.to_excel(writer, index=False, sheet_name=f"{warehouse_name} Weekly Summary")
+
+    wb.save(output)
+    output.seek(0)
+
+    return inventory_df, output
 
 
+# === 批量生成 + 打包 zip ===
 def run_all_simulations(file):
     st.session_state["run_all_mode"] = True
 
@@ -244,29 +249,32 @@ def run_all_simulations(file):
     available_warehouses = [name.replace("Container-", "") for name in xls.sheet_names if name.startswith("Container-")]
 
     all_inventory_dfs = []
+    regional_weeklies = {}
+
     with tempfile.TemporaryDirectory() as tmpdirname:
         excel_paths = []
+
         for wh in available_warehouses:
             try:
-                result = run_simulation(file, wh)
-                if isinstance(result, tuple):
-                    inventory_df, sim_output = result
-                    all_inventory_dfs.append(inventory_df)
-                else:
-                    sim_output = result
+                inventory_df, sim_output = run_simulation(file, wh)
+                all_inventory_dfs.append(inventory_df)
+                regional_weeklies[wh] = inventory_df.copy()
 
                 filename = f"{wh}_simulation.xlsx"
                 file_path = os.path.join(tmpdirname, filename)
                 with open(file_path, "wb") as f:
                     f.write(sim_output.read())
                 excel_paths.append(file_path)
+
             except Exception as e:
                 st.warning(f"⚠️ 仓库 {wh} 模拟失败：{e}")
 
+        # === 汇总日本 Daily Inventory
         if all_inventory_dfs:
             combined = pd.concat(all_inventory_dfs)
             combined["日期"] = pd.to_datetime(combined["日期"])
-            grouped = combined.groupby("日期", as_index=False).agg({
+
+            japan_grouped = combined.groupby("日期", as_index=False).agg({
                 "IJOOZ 仓库库存（单位）": "sum",
                 "外部冷库库存（整柜数）": "sum",
                 "使用柜数量": "sum",
@@ -274,55 +282,74 @@ def run_all_simulations(file):
                 "daily_usage": "sum",
                 "当天使用的货柜 PO": lambda x: ', '.join(filter(None, map(str, x)))
             })
-            grouped["日期"] = grouped["日期"].dt.strftime("%Y-%m-%d")
 
             japan_path = os.path.join(tmpdirname, "Japan_Daily_Inventory.xlsx")
             with pd.ExcelWriter(japan_path, engine="openpyxl") as writer:
-                grouped.to_excel(writer, index=False, sheet_name="Japan Daily Inventory")
+                japan_grouped.to_excel(writer, index=False, sheet_name="Japan Daily Inventory")
+
+                # === 日本 Weekly Summary
+                japan_grouped["year"] = japan_grouped["日期"].dt.isocalendar().year
+                japan_grouped["week"] = japan_grouped["日期"].dt.isocalendar().week
+                japan_weekly = japan_grouped.groupby(["year", "week"]).agg({
+                    "IJOOZ 仓库库存（单位）": "mean",
+                    "外部冷库库存（整柜数）": "mean",
+                    "使用柜数量": "sum",
+                    "运输中（单位）": "mean",
+                    "daily_usage": "sum"
+                }).reset_index()
+                japan_weekly.to_excel(writer, index=False, sheet_name="Japan Weekly Summary")
+
+                # === 每个城市的 Weekly Summary
+                for wh, region_df in regional_weeklies.items():
+                    region_df["日期"] = pd.to_datetime(region_df["日期"])
+                    region_df["year"] = region_df["日期"].dt.isocalendar().year
+                    region_df["week"] = region_df["日期"].dt.isocalendar().week
+                    region_weekly = region_df.groupby(["year", "week"]).agg({
+                        "IJOOZ 仓库库存（单位）": "mean",
+                        "外部冷库库存（整柜数）": "mean",
+                        "使用柜数量": "sum",
+                        "运输中（单位）": "mean",
+                        "daily_usage": "sum"
+                    }).reset_index()
+                    region_weekly.to_excel(writer, index=False, sheet_name=f"{wh} Weekly Summary")
+
             excel_paths.append(japan_path)
 
+        # === 打包所有文件到 zip
         zip_output = BytesIO()
         with zipfile.ZipFile(zip_output, "w") as zipf:
             for path in excel_paths:
                 arcname = os.path.basename(path)
                 zipf.write(path, arcname=arcname)
+
         zip_output.seek(0)
         return zip_output
 
-        
 # === 页面设置 ===
 st.set_page_config(page_title="IJOOZ 仓库模拟器", page_icon="🍊", layout="centered")
 st.markdown('<p class="title-text">🍊 IJOOZ 仓库模拟器</p>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle-text">上传仓库使用计划 Excel 文件，自动计算库存及生命周期，并生成图表。</p>', unsafe_allow_html=True)
 st.markdown("---")
 
-# === 仓库选项 ===
 warehouse_options = list(warehouse_capacities.keys())
 warehouse_options.insert(0, '全部仓库')
 warehouse_name = st.selectbox("📍 选择仓库地点", warehouse_options, index=0)
-
-# === 文件上传组件 ===
 uploaded_file = st.file_uploader("📤 上传 Excel 文件", type=["xlsx", "xls"])
 
-# === 主执行逻辑 ===
+# === 主入口 ===
 if uploaded_file and st.button("🚀 运行模拟"):
     try:
         today_str = datetime.date.today().strftime('%Y-%m-%d')
         with st.spinner("模拟进行中，请稍候..."):
-
-            # ✅ 全部仓库逻辑
             if warehouse_name == '全部仓库':
                 output_zip = run_all_simulations(uploaded_file)
                 filename = f"IJOOZ_Simulation_ALL_{today_str}.zip"
                 st.success("✅ 所有仓库模拟完成！点击下方按钮下载所有结果：")
                 st.download_button("📦 下载 ZIP 文件", data=output_zip, file_name=filename, mime="application/zip")
-
-            # ✅ 单仓库逻辑
             else:
-                output_excel = run_simulation(uploaded_file, warehouse_name)
+                _, output_excel = run_simulation(uploaded_file, warehouse_name)
                 filename = f"IJOOZ_Simulation_{warehouse_name}_{today_str}.xlsx"
-                st.success("✅ 模拟完成！点击下方按钮下载结果：")
+                st.success("✅ 仓库模拟完成！点击下方按钮下载结果：")
                 st.download_button("📥 下载 Excel 文件", data=output_excel, file_name=filename)
-
     except Exception as e:
         st.error(f"❌ 出错了：{str(e)}")
