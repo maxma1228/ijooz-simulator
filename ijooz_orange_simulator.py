@@ -284,10 +284,10 @@ def run_all_simulations(file):
         if all_inventory_dfs:
             japan_dfs = [df for wh, df in all_inventory_dfs if wh in ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]]
             if japan_dfs:
+                # === 先按日期汇总 ===
                 combined = pd.concat(japan_dfs)
                 combined["日期"] = pd.to_datetime(combined["日期"])
 
-                # --- 生成 Japan_Daily_Inventory ---
                 japan_daily = combined.groupby("日期", as_index=False).agg({
                     "IJOOZ 仓库库存（单位）": "sum",
                     "外部冷库库存（整柜数）": "sum",
@@ -298,10 +298,10 @@ def run_all_simulations(file):
                 })
                 japan_daily["日期"] = japan_daily["日期"].dt.strftime("%Y-%m-%d")
 
-                # --- 生成 Japan_Weekly_Summary ---
-                combined["周"] = pd.to_datetime(combined["日期"]).dt.isocalendar().week
-                japan_weekly = combined.groupby("周", as_index=False).agg({
-                    "daily_usage": "sum",
+                # === 再按周做 weekly summary ===
+                japan_daily["周"] = pd.to_datetime(japan_daily["日期"]).dt.isocalendar().week
+                japan_weekly = japan_daily.groupby("周", as_index=False).agg({
+                    "daily_usage": "sum",  # 周累计用量
                     "IJOOZ 仓库库存（单位）": "mean",
                     "外部冷库库存（整柜数）": "mean",
                     "运输中（单位）": "mean"
@@ -313,6 +313,7 @@ def run_all_simulations(file):
                     "运输中（单位）": "周平均运输中单位"
                 }, inplace=True)
 
+                # === 保存到Excel ===
                 japan_path = os.path.join(tmpdirname, "Japan_Daily_Inventory.xlsx")
                 with pd.ExcelWriter(japan_path, engine="openpyxl") as writer:
                     japan_daily.to_excel(writer, index=False, sheet_name="Japan Daily Inventory")
