@@ -1,91 +1,4 @@
-import pandas as pd
-import datetime
-from io import BytesIO
-import zipfile
-import os
-import tempfile
-import streamlit as st
-from openpyxl import load_workbook
-from openpyxl.chart import LineChart, BarChart, Reference
-
-# === 仓库容量配置 ===
-warehouse_capacities = {
-    'Singapore': 16,
-    'Tokyo': 16,
-    'Osaka': 4.5,
-    'Nagoya': 5,
-    'Fukuoka': 5
-}
-
-# === 图表函数 ===
-def add_charts_to_workbook(wb):
-    if "Daily Inventory" not in wb.sheetnames or "Container Schedule" not in wb.sheetnames:
-        return
-
-    sched_df = pd.DataFrame(wb["Container Schedule"].values)
-    headers = sched_df.iloc[0].tolist()
-    sched_df = sched_df[1:]
-    sched_df.columns = headers
-    if "开始使用时间" in sched_df.columns:
-        sched_df = sched_df.sort_values(by="开始使用时间")
-
-    wb.remove(wb["Container Schedule"])
-    ws_new = wb.create_sheet("Container Schedule")
-    for r_idx, row in enumerate([headers] + sched_df.values.tolist(), 1):
-        for c_idx, val in enumerate(row, 1):
-            ws_new.cell(row=r_idx, column=c_idx, value=val)
-
-    inv_ws = wb["Daily Inventory"]
-    inv_headers = [cell.value for cell in inv_ws[1]]
-    inv_data = []
-    for row in inv_ws.iter_rows(min_row=2, values_only=True):
-        row_dict = dict(zip(inv_headers, row))
-        for col in ["IJOOZ 仓库库存（单位）", "总库存（单位）"]:
-            if col in row_dict and isinstance(row_dict[col], (int, float)):
-                row_dict[col] = round(row_dict[col], 1)
-        inv_data.append(row_dict)
-
-    wb.remove(inv_ws)
-    new_inv_ws = wb.create_sheet("Daily Inventory")
-    for c_idx, col in enumerate(inv_headers, 1):
-        new_inv_ws.cell(row=1, column=c_idx, value=col)
-    for r_idx, row in enumerate(inv_data, 2):
-        for c_idx, col in enumerate(inv_headers, 1):
-            new_inv_ws.cell(row=r_idx, column=c_idx, value=row.get(col))
-
-    chart_sheet = wb.create_sheet("Charts")
-
-    chart1 = LineChart()
-    chart1.title = "每日库存趋势"
-    chart1.height = 10
-    chart1.width = 20
-    chart1.x_axis.title = "日期"
-    chart1.x_axis.numFmt = "yyyy-mm-dd"
-    chart1.y_axis.title = "库存单位数"
-    data = Reference(new_inv_ws, min_col=2, max_col=3, min_row=1, max_row=new_inv_ws.max_row)
-    categories = Reference(new_inv_ws, min_col=1, min_row=2, max_row=new_inv_ws.max_row)
-    chart1.add_data(data, titles_from_data=True)
-    chart1.set_categories(categories)
-    chart_sheet.add_chart(chart1, "A1")
-
-    sched_ws = wb["Container Schedule"]
-    chart2 = BarChart()
-    chart2.title = "每柜生命周期（天）"
-    chart2.height = 10
-    chart2.width = 20
-    po_col, life_col = 1, 1
-    for col in range(1, sched_ws.max_column + 1):
-        if sched_ws.cell(1, col).value == "PO":
-            po_col = col
-        if sched_ws.cell(1, col).value == "生命周期（天）":
-            life_col = col
-    data2 = Reference(sched_ws, min_col=life_col, min_row=1, max_row=sched_ws.max_row)
-    categories2 = Reference(sched_ws, min_col=po_col, min_row=2, max_row=sched_ws.max_row)
-    chart2.add_data(data2, titles_from_data=True)
-    chart2.set_categories(categories2)
-    chart_sheet.add_chart(chart2, "A20")
-
-# === 单仓库模拟函数 ===
+# --- 下面是完整改好版 run_simulation() ---
 def run_simulation(file, warehouse_name):
     if warehouse_name not in warehouse_capacities:
         raise ValueError(f"未定义仓库容量：{warehouse_name}")
@@ -100,9 +13,7 @@ def run_simulation(file, warehouse_name):
     container_df = xls.parse(container_sheet)
     weekly_usage_df = xls.parse(usage_sheet)
     weekly_usage_df[['year', 'week_number']] = weekly_usage_df['week'].str.extract(r'(\d{4})WK(\d{2})').astype(int)
-    weekly_usage_df['monday'] = pd.to_datetime(
-        weekly_usage_df['year'].astype(str) + weekly_usage_df['week_number'].astype(str) + '1', format='%G%V%u'
-    )
+    weekly_usage_df['monday'] = pd.to_datetime(weekly_usage_df['year'].astype(str) + weekly_usage_df['week_number'].astype(str) + '1', format='%G%V%u')
 
     daily_usage_records = []
     for _, row in weekly_usage_df.iterrows():
@@ -144,27 +55,11 @@ def run_simulation(file, warehouse_name):
 
     for day in date_range:
         used_today = []
-        for c in containers:
-            if c['in_ijooz_date'] is None and c['in_ext_date'] is None:
-                if c['can_enter_date'] <= day:
-                    if used_capacity + c['unit'] <= ijooz_capacity:
-                        c['in_ijooz_date'] = day
-                        ijooz_storage.append(c)
-                        used_capacity += c['unit']
-                    else:
-                        c['in_ext_date'] = day
-                        external_storage.append(c)
 
-        external_storage.sort(key=lambda x: x['in_ext_date'])
-        for c in external_storage[:]:
-            if used_capacity + c['unit'] <= ijooz_capacity:
-                c['in_ijooz_date'] = day
-                ijooz_storage.append(c)
-                used_capacity += c['unit']
-                external_storage.remove(c)
-
+        # === 1. 先处理出货 daily usage ===
         day_usage = daily_usage_df.loc[daily_usage_df['date'] == day, 'daily_usage'].sum()
         day_usage_original = day_usage
+
         while day_usage > 0 and ijooz_storage:
             c = ijooz_storage[0]
             if c['in_ijooz_date'] is not None and day < c['in_ijooz_date']:
@@ -181,6 +76,28 @@ def run_simulation(file, warehouse_name):
                 ijooz_storage.pop(0)
             used_today.append(c['PO'])
 
+        # === 2. 出货后再搬回外库 ===
+        external_storage.sort(key=lambda x: x['in_ext_date'])
+        for c in external_storage[:]:
+            if used_capacity + c['unit'] <= ijooz_capacity:
+                c['in_ijooz_date'] = day
+                ijooz_storage.append(c)
+                used_capacity += c['unit']
+                external_storage.remove(c)
+
+        # === 3. 处理 ETA 到达的新柜子 ===
+        for c in containers:
+            if c['in_ijooz_date'] is None and c['in_ext_date'] is None:
+                if c['can_enter_date'] <= day:
+                    if used_capacity + c['unit'] <= ijooz_capacity:
+                        c['in_ijooz_date'] = day
+                        ijooz_storage.append(c)
+                        used_capacity += c['unit']
+                    else:
+                        c['in_ext_date'] = day
+                        external_storage.append(c)
+
+        # === 4. 记录inventory log ===
         inventory_log.append({
             '日期': day,
             'IJOOZ 仓库库存（单位）': round(sum(c['unit'] - c['used'] for c in ijooz_storage), 1),
@@ -192,6 +109,7 @@ def run_simulation(file, warehouse_name):
             'daily_usage': round(day_usage_original, 2)
         })
 
+    # === 输出 ===
     schedule_df = pd.DataFrame([{
         'Vessel': c['Vessel'],
         'PO': c['PO'],
@@ -200,45 +118,34 @@ def run_simulation(file, warehouse_name):
         '单位': c['unit'],
         '进外面冷库时间': c['in_ext_date'],
         '进IJOOZ仓库时间': c['in_ijooz_date'],
+        '外面冷库天数': (c['in_ijooz_date'] - c['in_ext_date']).days if c['in_ext_date'] and c['in_ijooz_date'] else None,
         '开始使用时间': c['start_use'],
         '使用完的时间': c['end_use'],
         '生命周期（天）': (c['start_use'] - c['harvest_day']).days if c['start_use'] else None
     } for c in containers])
 
+    for col in ['Harvest Day', 'ETA', '进外面冷库时间', '进IJOOZ仓库时间', '开始使用时间', '使用完的时间']:
+        schedule_df[col] = pd.to_datetime(schedule_df[col]).dt.strftime('%Y-%m-%d')
+
     inventory_df = pd.DataFrame(inventory_log)
     inventory_df['日期'] = pd.to_datetime(inventory_df['日期']).dt.strftime('%Y-%m-%d')
-    schedule_df['Harvest Day'] = pd.to_datetime(schedule_df['Harvest Day']).dt.strftime('%Y-%m-%d')
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         schedule_df.to_excel(writer, index=False, sheet_name="Container Schedule")
         inventory_df.to_excel(writer, index=False, sheet_name="Daily Inventory")
-
     output.seek(0)
     wb = load_workbook(output)
-
-    # 添加 Charts
     add_charts_to_workbook(wb)
+    final_output = BytesIO()
+    wb.save(final_output)
+    final_output.seek(0)
 
-    # 添加单仓库 Weekly Summary
-    inventory_df["日期"] = pd.to_datetime(inventory_df["日期"])
-    inventory_df["year"] = inventory_df["日期"].dt.isocalendar().year
-    inventory_df["week"] = inventory_df["日期"].dt.isocalendar().week
-    weekly_summary = inventory_df.groupby(["year", "week"]).agg({
-        "IJOOZ 仓库库存（单位）": "mean",
-        "外部冷库库存（整柜数）": "mean",
-        "使用柜数量": "sum",
-        "运输中（单位）": "mean",
-        "daily_usage": "sum"
-    }).reset_index()
+    if st.session_state.get("run_all_mode") and warehouse_name in ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]:
+        return inventory_df, final_output
+    else:
+        return final_output
 
-    with pd.ExcelWriter(output, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
-        weekly_summary.to_excel(writer, index=False, sheet_name=f"{warehouse_name} Weekly Summary")
-
-    wb.save(output)
-    output.seek(0)
-
-    return inventory_df, output
 
 
 # === 批量生成 + 打包 zip ===
