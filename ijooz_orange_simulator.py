@@ -1,5 +1,3 @@
-### 🍊 最新最终完整版 🍊
-
 # 必须放最上面
 import streamlit as st
 st.set_page_config(page_title="IJOOZ 仓库模拟器", page_icon="🍊", layout="centered")
@@ -100,8 +98,6 @@ def add_charts_to_workbook(wb):
     chart2.set_categories(categories2)
     chart_sheet.add_chart(chart2, "A20")
 
-
-
 # === 单仓库模拟 ===
 def run_simulation(file, warehouse_name):
     if warehouse_name not in warehouse_capacities:
@@ -116,18 +112,8 @@ def run_simulation(file, warehouse_name):
 
     container_df = xls.parse(container_sheet)
     weekly_usage_df = xls.parse(usage_sheet)
-
-    container_df['HARVEST DAY'] = pd.to_datetime(container_df['HARVEST DAY'])
-    container_df['ETA'] = pd.to_datetime(container_df['ETA'])
-    if 'ETD' in container_df.columns:
-        container_df['ETD'] = pd.to_datetime(container_df['ETD'])
-    else:
-        container_df['ETD'] = container_df['ETA'] - pd.Timedelta(days=30)
-
     weekly_usage_df[['year', 'week_number']] = weekly_usage_df['week'].str.extract(r'(\d{4})WK(\d{2})').astype(int)
-    weekly_usage_df['monday'] = pd.to_datetime(
-        weekly_usage_df['year'].astype(str) + weekly_usage_df['week_number'].astype(str) + '1', format='%G%V%u'
-    )
+    weekly_usage_df['monday'] = pd.to_datetime(weekly_usage_df['year'].astype(str) + weekly_usage_df['week_number'].astype(str) + '1', format='%G%V%u')
 
     daily_usage_records = []
     for _, row in weekly_usage_df.iterrows():
@@ -139,25 +125,29 @@ def run_simulation(file, warehouse_name):
             })
     daily_usage_df = pd.DataFrame(daily_usage_records)
 
+    container_df['HARVEST DAY'] = pd.to_datetime(container_df['HARVEST DAY'])
+    container_df['ETA'] = pd.to_datetime(container_df['ETA'])
+    container_df['ETD'] = pd.to_datetime(container_df.get('ETD', pd.NaT))
+
+    container_df = container_df.sort_values(by='HARVEST DAY').reset_index(drop=True)
+
     today = pd.Timestamp(datetime.date.today())
     containers = []
     for idx, row in container_df.iterrows():
-        eta = row['ETA']
-        etd = row['ETD']
         containers.append({
             'index': idx,
             'PO': row['PO'],
             'Vessel': row.get('Vessel', ''),
             'harvest_day': row['HARVEST DAY'],
-            'eta': eta,
-            'etd': etd,
+            'eta': row['ETA'],
+            'etd': row['ETD'],
             'unit': float(row['单位']),
             'in_ext_date': None,
-            'in_ijooz_date': today if pd.isnull(eta) else None,
+            'in_ijooz_date': today if pd.isna(row['ETA']) else None,
             'start_use': None,
             'end_use': None,
             'used': 0,
-            'can_enter_date': eta + pd.Timedelta(days=3) if pd.notnull(eta) else today
+            'can_enter_date': row['ETA'] + pd.Timedelta(days=3) if pd.notna(row['ETA']) else today
         })
 
     ijooz_storage = [c for c in containers if c['in_ijooz_date'] is not None]
@@ -168,13 +158,13 @@ def run_simulation(file, warehouse_name):
     for day in date_range:
         used_today = []
 
-        # === 扣 daily usage ===
+        # === 每天先扣 daily usage ===
         day_usage = daily_usage_df.loc[daily_usage_df['date'] == day, 'daily_usage'].sum()
         day_usage_original = day_usage
 
         while day_usage > 0 and ijooz_storage:
             c = ijooz_storage[0]
-            if c['in_ijooz_date'] is not None and day < c['in_ijooz_date']:
+            if c['in_ijooz_date'] and day < c['in_ijooz_date']:
                 break
             remaining = c['unit'] - c['used']
             if c['start_use'] is None:
@@ -187,9 +177,9 @@ def run_simulation(file, warehouse_name):
                 ijooz_storage.pop(0)
             used_today.append(c['PO'])
 
-        # === 处理入仓 ===
         current_total_inventory = sum(x['unit'] - x['used'] for x in ijooz_storage)
 
+        # === 新柜入仓 ===
         for c in containers:
             if c['in_ijooz_date'] is None and c['in_ext_date'] is None:
                 if c['can_enter_date'] <= day:
@@ -201,6 +191,7 @@ def run_simulation(file, warehouse_name):
                         c['in_ext_date'] = day
                         external_storage.append(c)
 
+        # === 外库搬回来 ===
         external_storage.sort(key=lambda x: x['in_ext_date'])
         for c in external_storage[:]:
             if ijooz_capacity - current_total_inventory >= 1:
@@ -211,26 +202,24 @@ def run_simulation(file, warehouse_name):
             else:
                 break
 
-        # === 运输中、PO Placed ===
-        in_transit_units = sum(c['unit'] for c in containers if c['etd'] <= day < c['eta'])
-        po_placed_units = sum(c['unit'] for c in containers if day < c['etd'])
+        # === 统计运输中、PO placed ===
+        po_placed_units = sum(c['unit'] for c in containers if c['etd'] and day < c['etd'])
+        in_transit_units = sum(c['unit'] for c in containers if c['etd'] and c['eta'] and c['etd'] <= day < c['eta'])
 
+        # === 每日库存记录 ===
         inventory_log.append({
             '日期': day,
             'IJOOZ 仓库库存（单位）': round(sum(c['unit'] - c['used'] for c in ijooz_storage), 1),
             '外部冷库库存（整柜数）': len(external_storage),
             '当天使用的货柜 PO': ', '.join(set(used_today)),
             '使用柜数量': len(set(used_today)),
-            '总库存（单位）': round(
-                sum(c['unit'] - c['used'] for c in ijooz_storage) +
-                sum(c['unit'] for c in external_storage), 1
-            ),
-            '运输中（单位）': round(in_transit_units, 1),
+            '总库存（单位）': round(sum(c['unit'] - c['used'] for c in ijooz_storage) + sum(c['unit'] for c in external_storage), 1),
             'PO Placed（单位）': round(po_placed_units, 1),
+            '运输中（单位）': round(in_transit_units, 1),
             'daily_usage': round(day_usage_original, 2)
         })
 
-    # ✅ 输出 Container Schedule + Daily Inventory
+        # === 输出文件 ===
     schedule_df = pd.DataFrame([{
         'Vessel': c['Vessel'],
         'PO': c['PO'],
@@ -257,27 +246,26 @@ def run_simulation(file, warehouse_name):
         schedule_df.to_excel(writer, index=False, sheet_name="Container Schedule")
         inventory_df.to_excel(writer, index=False, sheet_name="Daily Inventory")
     output.seek(0)
-
     wb = load_workbook(output)
     add_charts_to_workbook(wb)
     final_output = BytesIO()
     wb.save(final_output)
     final_output.seek(0)
 
-    # 批量模式：额外返回 inventory_df
     if st.session_state.get("run_all_mode") and warehouse_name in ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]:
         return inventory_df, final_output
     else:
         return final_output
 
-# === 批量生成 ===
+# === 批量生成所有仓库 ===
 def run_all_simulations(file):
-    st.session_state["run_all_mode"] = True  # 开启批量标志
+    st.session_state["run_all_mode"] = True  # 标记是批量模式
 
     xls = pd.ExcelFile(file)
     available_warehouses = [name.replace("Container-", "") for name in xls.sheet_names if name.startswith("Container-")]
 
-    all_inventory_dfs = []
+    all_inventory_dfs = []  # 日本仓库的 daily 汇总
+
     with tempfile.TemporaryDirectory() as tmpdirname:
         excel_paths = []
         for wh in available_warehouses:
@@ -295,55 +283,54 @@ def run_all_simulations(file):
                 with open(file_path, "wb") as f:
                     f.write(sim_output.read())
                 excel_paths.append(file_path)
+
             except Exception as e:
                 st.warning(f"⚠️ 仓库 {wh} 模拟失败：{e}")
 
-        # ✅ 汇总日本 Tokyo/Osaka/Nagoya/Fukuoka 仓库
-        japan_warehouses = ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]
-        japan_dfs = [df for wh, df in all_inventory_dfs if wh in japan_warehouses]
-        if japan_dfs:
-            combined = pd.concat(japan_dfs)
-            combined["日期"] = pd.to_datetime(combined["日期"])
+        # ✅ 生成 Japan 汇总
+        if all_inventory_dfs:
+            japan_dfs = [df for wh, df in all_inventory_dfs if wh in ["Tokyo", "Osaka", "Nagoya", "Fukuoka"]]
+            if japan_dfs:
+                combined = pd.concat(japan_dfs)
+                combined["日期"] = pd.to_datetime(combined["日期"])
 
-            # --- Japan Daily Inventory ---
-            japan_daily = combined.groupby("日期", as_index=False).agg({
-                "IJOOZ 仓库库存（单位）": "sum",
-                "外部冷库库存（整柜数）": "sum",
-                "使用柜数量": "sum",
-                "运输中（单位）": "sum",
-                "PO Placed（单位）": "sum",
-                "daily_usage": "sum",
-                "当天使用的货柜 PO": lambda x: ', '.join(filter(None, map(str, x)))
-            })
-            japan_daily["日期"] = japan_daily["日期"].dt.strftime("%Y-%m-%d")
+                # --- Japan_Daily_Inventory ---
+                japan_daily = combined.groupby("日期", as_index=False).agg({
+                    "IJOOZ 仓库库存（单位）": "sum",
+                    "外部冷库库存（整柜数）": "sum",
+                    "使用柜数量": "sum",
+                    "运输中（单位）": "sum",
+                    "PO Placed（单位）": "sum",
+                    "daily_usage": "sum",
+                    "当天使用的货柜 PO": lambda x: ', '.join(filter(None, map(str, x)))
+                })
+                japan_daily["日期"] = japan_daily["日期"].dt.strftime("%Y-%m-%d")
 
-            # --- Japan Weekly Summary ---
-            combined["周"] = combined["日期"].dt.isocalendar().week
-            japan_weekly = combined.groupby("周", as_index=False).agg({
-                "daily_usage": "sum",
-                "IJOOZ 仓库库存（单位）": "mean",
-                "外部冷库库存（整柜数）": "mean",
-                "运输中（单位）": "mean",
-                "PO Placed（单位）": "mean"
-            })
-            japan_weekly.rename(columns={
-                "daily_usage": "周累计用量（单位）",
-                "IJOOZ 仓库库存（单位）": "周平均IJOOZ库存",
-                "外部冷库库存（整柜数）": "周平均外库库存",
-                "运输中（单位）": "周平均运输中单位",
-                "PO Placed（单位）": "周平均PO Placed单位"
-            }, inplace=True)
+                # --- Japan_Weekly_Summary ---
+                japan_daily["周"] = pd.to_datetime(japan_daily["日期"]).dt.isocalendar().week
+                japan_weekly = japan_daily.groupby("周", as_index=False).agg({
+                    "daily_usage": "sum",                       # 周累计用量
+                    "IJOOZ 仓库库存（单位）": "mean",            # 周平均IJOOZ库存
+                    "外部冷库库存（整柜数）": "mean",            # 周平均外库库存
+                    "运输中（单位）": "mean",                   # 周平均运输中单位
+                    "PO Placed（单位）": "mean"                 # 周平均PO placed单位
+                })
 
-            # 保留一位小数
-            japan_weekly = japan_weekly.round(1)
+                japan_weekly.rename(columns={
+                    "daily_usage": "周累计用量（单位）",
+                    "IJOOZ 仓库库存（单位）": "周平均IJOOZ库存",
+                    "外部冷库库存（整柜数）": "周平均外库库存",
+                    "运输中（单位）": "周平均运输中单位",
+                    "PO Placed（单位）": "周平均PO Placed"
+                }, inplace=True)
 
-            japan_path = os.path.join(tmpdirname, "Japan_Daily_Inventory.xlsx")
-            with pd.ExcelWriter(japan_path, engine="openpyxl") as writer:
-                japan_daily.to_excel(writer, index=False, sheet_name="Japan Daily Inventory")
-                japan_weekly.to_excel(writer, index=False, sheet_name="Japan Weekly Summary")
-            excel_paths.append(japan_path)
+                japan_path = os.path.join(tmpdirname, "Japan_Daily_Inventory.xlsx")
+                with pd.ExcelWriter(japan_path, engine="openpyxl") as writer:
+                    japan_daily.to_excel(writer, index=False, sheet_name="Japan Daily Inventory")
+                    japan_weekly.to_excel(writer, index=False, sheet_name="Japan Weekly Summary")
+                excel_paths.append(japan_path)
 
-        # ✅ 打包成 ZIP
+        # ✅ 打包所有生成的excel
         zip_output = BytesIO()
         with zipfile.ZipFile(zip_output, "w") as zipf:
             for path in excel_paths:
@@ -351,3 +338,34 @@ def run_all_simulations(file):
                 zipf.write(path, arcname=arcname)
         zip_output.seek(0)
         return zip_output
+
+# === 页面布局 ===
+st.title("🍊 IJOOZ 仓库模拟器")
+st.markdown("上传仓库使用计划 Excel 文件，自动计算库存及生命周期，并生成图表。")
+st.markdown("---")
+
+warehouse_options = list(warehouse_capacities.keys())
+warehouse_options.insert(0, "全部仓库")
+warehouse_name = st.selectbox("📍 选择仓库地点", warehouse_options, index=0)
+uploaded_file = st.file_uploader("📤 上传 Excel 文件", type=["xlsx", "xls"])
+
+# === 主执行逻辑 ===
+if uploaded_file and st.button("🚀 运行模拟"):
+    try:
+        today_str = datetime.date.today().strftime('%Y-%m-%d')
+        with st.spinner("模拟进行中，请稍候..."):
+
+            if warehouse_name == "全部仓库":
+                output_zip = run_all_simulations(uploaded_file)
+                filename = f"IJOOZ_Simulation_ALL_{today_str}.zip"
+                st.success("✅ 所有仓库模拟完成！点击下方按钮下载所有结果：")
+                st.download_button("📦 下载 ZIP 文件", data=output_zip, file_name=filename, mime="application/zip")
+
+            else:
+                output_excel = run_simulation(uploaded_file, warehouse_name)
+                filename = f"IJOOZ_Simulation_{warehouse_name}_{today_str}.xlsx"
+                st.success("✅ 模拟完成！点击下方按钮下载结果：")
+                st.download_button("📥 下载 Excel 文件", data=output_excel, file_name=filename)
+
+    except Exception as e:
+        st.error(f"❌ 出错了：{str(e)}")
